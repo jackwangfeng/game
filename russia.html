@@ -1,0 +1,425 @@
+<html>
+
+<body>
+  <canvas id="myCanvas" style="border:1px solid #c3c3c3;"></canvas>
+  <canvas id="myCanvas1" style="border:1px solid #c3c3c3;position:absolute;top:8px;"></canvas>
+  <button id="startgame">start game</button>
+  <canvas id="myCanvas2" style="border:1px solid #c3c3c3;"></canvas>
+
+  <script>
+    var game_row = 20
+    var game_col = 10
+    var block_pixel = 30
+    var game_width = block_pixel * game_col
+    var game_height = block_pixel * game_row
+    //keycode
+    var DOWN_KEY = 83 //s
+    var LEFT_KEY = 65 //a
+    var RIGHT_KEY = 68 //d
+    var ROTATE_KEY = 74 //j
+
+    var g_ctx
+    var g_tmp_ctx;
+
+    function getRandom(n, m) {
+      var n = Number(n);    //强制转换成数字
+      var m = Number(m);
+      if (isNaN(n) || isNaN(m)) {    //判断是否为有效数字 ，其中一个不是有效数字就返回[0,1)之间的随机小数
+        return math.random();
+      }
+      if (n > m) {     //如果n>m则交换
+        var temp = n;
+        n = m;
+        m = temp;
+      }
+      return Math.round(Math.random() * (m - n) + n);
+    }
+
+    //color set
+    var color_arr = ["red", "green", "blue", "yellow", "purple", "orange"];
+    function get_color_str(num) {
+      if (num > color_arr.length || num < 1)
+        return "red"
+      return color_arr[num - 1]
+    }
+    function get_color() {
+      tmp_index = getRandom(1, color_arr.length)
+      return tmp_index
+    }
+
+
+    //block struct set
+    function base_block() {
+      var row_len = 0
+      var col_len = 0
+      tmp_index = getRandom(0, 6)
+      var block_data = []
+      switch (tmp_index) {
+        case 0:
+          block_data[0] = new Array(get_color(), get_color(), get_color(), get_color());
+          row_len = 1;
+          col_len = 4;
+          break;
+        case 1:
+          block_data[0] = new Array(get_color(), 0, 0);
+          block_data[1] = new Array(get_color(), get_color(), get_color());
+          row_len = 2;
+          col_len = 3;
+          break;
+        case 2:
+          block_data[0] = new Array(get_color(), get_color());
+          block_data[1] = new Array(get_color(), get_color());
+          row_len = 2;
+          col_len = 2;
+          break;
+        case 3:
+          block_data[0] = new Array(get_color(), get_color(), get_color());
+          block_data[1] = new Array(get_color(), 0, 0);
+          row_len = 2;
+          col_len = 3;
+          break;
+        case 4:
+          block_data[0] = new Array(0, 0, get_color());
+          block_data[1] = new Array(get_color(), get_color(), get_color());
+          row_len = 2;
+          col_len = 3;
+          break;
+        case 5:
+          block_data[0] = new Array(get_color(), 0);
+          block_data[1] = new Array(get_color(), get_color());
+          block_data[2] = new Array(0, get_color());
+          row_len = 3;
+          col_len = 2;
+          break;
+        case 6:
+          block_data[0] = new Array(get_color(), 0);
+          block_data[1] = new Array(get_color(), get_color());
+          block_data[2] = new Array(get_color(), 0);
+          row_len = 3;
+          col_len = 2;
+          break;
+        case 7:
+          block_data[0] = new Array(0, get_color(), 0);
+          block_data[1] = new Array(get_color(), get_color(), get_color());
+          block_data[2] = new Array(0, get_color(), 0);
+          row_len = 3;
+          col_len = 3;
+          break;
+        default:
+      }
+
+      this.draw = function (ctx, index) {
+        for (var i = 0; i < row_len; i++) {
+          for (var j = 0; j < col_len; j++) {
+            if (block_data[i][j] > 0) {
+              ctx.fillStyle = get_color_str(block_data[i][j])
+              ctx.strokeRect((j + index.col) * block_pixel, (i + index.row) * block_pixel, block_pixel, block_pixel)
+              ctx.fillRect((j + index.col) * block_pixel, (i + index.row) * block_pixel, block_pixel, block_pixel)
+            }
+          }
+        }
+      }
+
+      this.get_row_len = function () {
+        return row_len
+      }
+      this.get_col_len = function () {
+        return col_len
+      }
+      this.get_color = function (row, col) {
+        return block_data[row][col]
+      }
+
+      this.rotate = function (game_screen) {
+        //右侧转不过去
+        if (game_col - game_screen.get_index().col < row_len) {
+          return
+        }
+        //底部转不过去
+        if (game_row - game_screen.get_index().row < col_len) {
+          return
+        }
+        var temp_a = [];
+        for (var ii = 0; ii < col_len; ii++) {
+          temp_a[ii] = new Array;
+          for (var jj = row_len - 1; jj >= 0; jj--) {
+            temp_a[ii][row_len - 1 - jj] = block_data[jj][ii]
+            //检查一下转过去会不会和整个格子冲突, 否则直接返回 不转了
+            if (game_screen.get_data()[ii + game_screen.get_index().row][row_len - 1 - jj + game_screen.get_index().col] > 0) {
+              return
+            }
+          }
+        }
+        //switch row col
+        block_data = temp_a
+        tmprow = row_len
+        row_len = col_len
+        col_len = tmprow
+      }
+    }
+
+    var g_view_game;
+    function Game(is_view) {
+      var _data = [] 
+      var _active_data = null
+      var _index = { row: 0, col: 4 }
+      var _pre_block = null
+      var _if_merge = 0
+      var _game_status = 0
+      var _ctx = null
+      var _is_view =is_view ? is_view:false
+
+      this.active_init = function () {
+        if (_pre_block == null)
+          _pre_block = new base_block()
+        _active_data = _pre_block
+        _pre_block = new base_block()
+
+        g_tmp_ctx.clearRect(0, 0, block_pixel * 5, block_pixel * 5)
+        _pre_block.draw(g_tmp_ctx, { row: 1, col: 1 })
+      }
+
+      this.start = function (ctx) {
+        if (_game_status == 1)
+          return
+        this.init_data(ctx)
+
+        _this = this
+        var t1 = setInterval(function () {
+          if (!_this.down()) {
+            alert("game over")
+            window.clearInterval(t1);
+          }
+        var tmp_data = {
+          main_data:_data,
+          active_data:_active_data,
+          index:_index
+        }
+        g_view_game.update_data(tmp_data)
+        }, 500)
+
+        document.onkeydown = function (event) {
+          var e = event || window.event || arguments.callee.caller.arguments[0];
+          _this.game_ctrl(e)
+        }
+        _game_status = 1
+      }
+
+      this.update_data = function (game_data) {
+        //json 解码
+        //背景数据，acitvie块数据
+        //
+        _data = game_data.main_data
+        _active_data = game_data.active_data
+        _index = game_data.index
+        this.redrawScreen()
+      }
+
+      this.rotate = function () {
+        _active_data.rotate(this)
+        this.redrawScreen()
+        return true
+      }
+
+      this.get_index = function () {
+        return _index
+      }
+      this.get_data = function () {
+        return _data
+      }
+
+      this.init_data = function (ctx) {
+        for (var ii = 0; ii < game_row; ii++) {
+          _data[ii] = new Array()
+          for (var jj = 0; jj < game_col; jj++) {
+            _data[ii][jj] = 0
+          }
+        }
+        if (!_is_view)
+          this.active_init()
+        _ctx = ctx
+      }
+
+
+      this.redrawScreen = function () {
+        _ctx.clearRect(0, 0, game_width, game_height)
+        for (var ii = 0; ii < game_row; ii++) {
+          for (var jj = 0; jj < game_col; jj++) {
+            if (_data[ii][jj] > 0) {
+              _ctx.fillStyle = get_color_str(_data[ii][jj])
+              _ctx.strokeRect(jj * block_pixel, ii * block_pixel, block_pixel, block_pixel)
+              _ctx.fillRect(jj * block_pixel, ii * block_pixel, block_pixel, block_pixel)
+            }
+          }
+        }
+        //draw active
+        _active_data.draw(_ctx, _index)
+      }
+
+      this.merge = function () {
+        //合并
+        for (var aa = 0; aa < _active_data.get_row_len(); aa++) {
+          for (var bb = 0; bb < _active_data.get_col_len(); bb++) {
+            if (_active_data.get_color(aa, bb) > 0) {
+              _data[aa + _index.row][bb + _index.col] = _active_data.get_color(aa, bb)
+            }
+          }
+        }
+        //判断是否需要消掉几格
+        for (var ii = 0; ii < game_row; ii++) {
+          var sum = 0;
+          for (var jj = 0; jj < game_col; jj++) {
+            if (_data[ii][jj] > 0)
+              sum++;
+          }
+          if (sum == game_col) {
+            _data.splice(ii, 1)
+            var tmp = new Array;
+            tmp.length = game_col
+            _data.unshift(tmp)
+          }
+        }
+        this.active_init()
+        var tmp = Math.round((game_col - _active_data.get_col_len()) / 2)
+        _index = { row: 0, col: tmp };
+        _if_merge++
+      }
+
+      this.check_touch_bottom = function () {
+        var jj = _active_data.get_col_len() - 1
+        for (var ii = _active_data.get_row_len() - 1; ii >= 0; ii--) {
+          for (var jj = 0; jj < _active_data.get_col_len(); jj++) {
+            if (_active_data.get_color(ii, jj) > 0) {
+              if (_data[ii + _index.row + 1][jj + _index.col] > 0) {
+                if (_index.row == 0) {
+                  return 2
+                }
+                return 1
+              }
+            }
+          }
+        }
+        return 0
+      }
+
+      this.check_touch_horizontal = function (plus) {
+        for (var ii = 0; ii < _active_data.get_row_len(); ii++) {
+          for (var jj = 0; jj < _active_data.get_col_len(); jj++) {
+            if (_active_data.get_color(ii, jj) > 0) {
+              if (_data[ii + _index.row][jj + _index.col + plus] > 0) {
+                return 1
+              }
+            }
+          }
+        }
+        return 0
+      }
+
+      this.down = function () {
+        if (_index.row + _active_data.get_row_len() == game_row) {
+          this.merge()
+          return true
+        }
+        var check = this.check_touch_bottom()
+        if (check == 2) //game over
+        {
+          _game_status = 0
+          return false
+        }
+
+        if (check == 1) {
+          this.merge()
+          return true
+        }
+
+        _index.row++
+        this.redrawScreen()
+        return true
+      }
+
+      this.right = function () {
+        var len = _active_data.get_col_len()
+        this.redrawScreen()
+        if (_index.col + len >= 10) {
+          return
+        }
+
+        if (this.check_touch_horizontal(1) == 1) {
+          return
+        }
+        _index.col++
+      }
+
+      this.left = function () {
+        var len = _active_data.get_row_len()
+        this.redrawScreen()
+        if (_index.col == 0) {
+          return
+        }
+
+        if (this.check_touch_horizontal(-1) == 1) {
+          return
+        }
+        _index.col--
+      }
+
+      this.game_ctrl = function (e) {
+        if (e && e.keyCode == LEFT_KEY) { // 按h 
+          this.left()
+        }
+        else if (e && e.keyCode == DOWN_KEY) { // 按l
+          //要做的事情
+          this.down()
+        }
+        else if (e && e.keyCode == RIGHT_KEY) { // 按l
+          //要做的事情
+          this.right()
+        }
+        else if (e && e.keyCode == ROTATE_KEY) { // 按l
+          this.rotate()
+        }
+      }
+    }
+
+    function main() {
+      var c = document.getElementById("myCanvas");
+      c.width = game_width
+      c.height = game_height
+      var ctx = c.getContext("2d");
+      ctx.fillStyle = "red";
+      ctx.strokeStyle = "black"
+      g_ctx = ctx
+
+      var c1 = document.getElementById("myCanvas1");
+      c1.width = block_pixel * 5
+      c1.height = block_pixel * 5
+
+      var ctx1 = c1.getContext("2d");
+      ctx1.fillStyle = "#FF0000";
+      ctx1.strokeStyle = "black"
+      g_tmp_ctx = ctx1
+
+      var c2 = document.getElementById("startgame");
+      game = new Game()
+      c2.onclick = function () {
+        game.start(ctx)
+      }
+      
+      var c3 = document.getElementById("myCanvas2");
+      //c3.style.width = string(game_width) + "px"
+      //c3.style.height =string(game_height) + "px"
+      c3.width =game_width
+      c3.height= game_height
+      c3.style.position="absolute"
+      c3.style.left = "500px"
+      var ctx3 = c3.getContext("2d")
+      view_game = new Game(true)
+      view_game.init_data(ctx3)
+      g_view_game = view_game
+    }
+    main()
+  </script>
+
+</body>
+
+</html>
